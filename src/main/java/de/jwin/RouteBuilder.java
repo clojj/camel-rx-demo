@@ -54,7 +54,7 @@ public class RouteBuilder extends org.apache.camel.builder.RouteBuilder {
 //                    .onBackpressureDrop()
                     .observeOn(Schedulers.from(executor)).forEach(message -> {
                 try {
-                    Thread.sleep(10);
+                    Thread.sleep(20);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
