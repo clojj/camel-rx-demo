@@ -29,10 +29,17 @@
             <version>2.17.0</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.camel</groupId>
+            <artifactId>camel-metrics</artifactId>
+            <version>2.17.0</version>
+        </dependency>
+
+        <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
             <version>19.0</version>
         </dependency>
+
         <!-- logging -->
         <dependency>
             <groupId>org.slf4j</groupId>
