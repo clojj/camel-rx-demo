@@ -6,6 +6,7 @@ import org.apache.camel.rx.ReactiveCamel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import rx.Observable;
+import rx.Subscription;
 import rx.schedulers.Schedulers;
 
 import java.util.concurrent.Executor;
@@ -15,7 +16,7 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(RxDemoRouteBuilder.class);
 
-    private Executor executor = Executors.newFixedThreadPool(3);
+    private Executor executor = Executors.newFixedThreadPool(4);
 /*
     private Executor executor = Executors.newFixedThreadPool(3,
         r -> {
@@ -34,42 +35,57 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
     private int counter;
 
     public void configure() throws Exception {
-        from("timer:fast-timer?period=1")
-                .to("metrics:timer:simple.timer?action=start")
+
+        from("timer:slow-timer?period=1000").id("rx-in-slow")
                 .process(exchange -> {
-                    Thread.sleep(500);
+                    exchange.getOut().setBody("from rx-slow " + exchange.getIn().getHeader("firedTime"));
+                })
+                .to("direct:rx-in-slow");
+
+        from("timer:fast-timer?period=1").id("rx-in")
+//                .to("metrics:timer:simple.timer?action=start")
+                .process(exchange -> {
                     exchange.getOut().setBody(counter++);
                 })
-                .to("direct:rx-in")
-                .to("metrics:timer:simple.timer?action=stop");
+//                .to("metrics:timer:simple.timer?action=stop")
+                .to("direct:rx-in");
+
+        from("direct:rx-out").id("rx-out")
+                .process(exchange -> LOG.info("OUT " + exchange.getIn().getBody()));
 
 
+        // setup JMX
         final MetricsRoutePolicyFactory routePolicyFactory = new MetricsRoutePolicyFactory();
         routePolicyFactory.setUseJmx(true);
         getContext().addRoutePolicyFactory(routePolicyFactory);
 
+
         getContext().addStartupListener((camelContext, b) -> {
 
             ReactiveCamel rx = new ReactiveCamel(camelContext);
-            final Observable<Message> messageObservable = rx.toObservable("direct:rx-in");
+
+            final Observable<Message> rxIn = rx.toObservable("direct:rx-in");
+            Observable<Message> rxIn2 = rx.toObservable("direct:rx-in-slow");
 /*
-            ConnectableObservable<Message> connectableObservable = messageObservable.publish();
+            ConnectableObservable<Message> connectableObservable = rxIn.publish();
             connectableObservable.connect();
 			connectableObservable
 */
 
-            messageObservable
+            Subscription subscription = rxIn
 //					.onBackpressureDrop()
-                    .onBackpressureDrop(message -> LOG.warn("DROPPED {}", message.getBody()))
+                    .onBackpressureDrop(message -> LOG.debug("DROPPED {}", message.getBody()))
+//                    .subscribeOn(Schedulers.from(executor))
                     .observeOn(Schedulers.from(executor))
-                    .forEach(message -> {
+                    .mergeWith(rxIn2)
+                    .subscribe(message -> {
                         try {
                             Thread.sleep(10);
                         } catch (InterruptedException e) {
                             e.printStackTrace();
                         }
-
-                        LOG.info("counter {} thread {}", message.getBody(), Thread.currentThread().getName());
+                        LOG.info("counter {} on thread {}", message.getBody(), Thread.currentThread().getName());
+//                        rx.sendTo(Observable.just(message.getBody()), "direct:rx-out");
                     });
         });
     }
