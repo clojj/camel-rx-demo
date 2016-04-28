@@ -1,7 +1,9 @@
 package de.jwin;
 
 import org.apache.camel.Message;
+import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.metrics.routepolicy.MetricsRoutePolicyFactory;
+import org.apache.camel.rx.ObservableBody;
 import org.apache.camel.rx.ReactiveCamel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,9 +40,10 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
 
         from("timer:slow-timer?period=1000").id("rx-in-slow")
                 .process(exchange -> {
-                    exchange.getOut().setBody("from rx-slow " + exchange.getIn().getHeader("firedTime"));
+                    exchange.getOut().setBody("from rx-in-slow " + exchange.getIn().getHeader("firedTime"));
                 })
-                .to("direct:rx-in-slow");
+                .to("direct:rx-in-slow")
+                .to("direct:rx-in-slow'");
 
         from("timer:fast-timer?period=1").id("rx-in")
 //                .to("metrics:timer:simple.timer?action=start")
@@ -51,8 +54,24 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
                 .to("direct:rx-in");
 
         from("direct:rx-out").id("rx-out")
-                .process(exchange -> LOG.info("OUT " + exchange.getIn().getBody()));
+                .process(exchange -> LOG.info("@rx-out " + exchange.getIn().getBody()));
 
+        ProducerTemplate template = getContext().createProducerTemplate();
+        class RxRouteInline extends ObservableBody<String> {
+            private RxRouteInline() {
+                super(String.class);
+            }
+
+            protected void configure(Observable<String> observable) {
+                // lets process the messages using the RX API
+                observable
+                        .map(body -> "Hello " + body)
+                        .subscribe(body -> {
+                            template.sendBody("direct:rx-out", body);
+                        });
+            }
+        }
+        from("direct:rx-in-slow'").process(new RxRouteInline());
 
         // setup JMX
         final MetricsRoutePolicyFactory routePolicyFactory = new MetricsRoutePolicyFactory();
@@ -65,7 +84,7 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
             ReactiveCamel rx = new ReactiveCamel(camelContext);
 
             final Observable<Message> rxIn = rx.toObservable("direct:rx-in");
-            Observable<Message> rxIn2 = rx.toObservable("direct:rx-in-slow");
+            Observable<Message> rxInSlow = rx.toObservable("direct:rx-in-slow");
 /*
             ConnectableObservable<Message> connectableObservable = rxIn.publish();
             connectableObservable.connect();
@@ -77,7 +96,7 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
                     .onBackpressureDrop(message -> LOG.debug("DROPPED {}", message.getBody()))
 //                    .subscribeOn(Schedulers.from(executor))
                     .observeOn(Schedulers.from(executor))
-                    .mergeWith(rxIn2)
+                    .mergeWith(rxInSlow)
                     .subscribe(message -> {
                         try {
                             Thread.sleep(10);
