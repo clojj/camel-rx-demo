@@ -1,5 +1,6 @@
 package de.jwin;
 
+import org.apache.camel.LoggingLevel;
 import org.apache.camel.Message;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.metrics.routepolicy.MetricsRoutePolicyFactory;
@@ -11,10 +12,12 @@ import rx.Observable;
 import rx.Subscription;
 import rx.schedulers.Schedulers;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
+class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(RxDemoRouteBuilder.class);
 
@@ -38,6 +41,8 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
 
     public void configure() throws Exception {
 
+        ProducerTemplate template = getContext().createProducerTemplate();
+
         from("timer:slow-timer?period=1000").id("rx-in-slow")
                 .process(exchange -> {
                     exchange.getOut().setBody("from rx-in-slow " + exchange.getIn().getHeader("firedTime"));
@@ -54,9 +59,15 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
                 .to("direct:rx-in");
 
         from("direct:rx-out").id("rx-out")
-                .process(exchange -> LOG.info("@rx-out " + exchange.getIn().getBody()));
+                .process(exchange -> LOG.info("@rx-out " + exchange.getIn().getBody()))
+                // elasticsearch
+                .process(exchange -> {
+                    Map<String, String> map = new HashMap<>();
+                    map.put("content", (String) exchange.getIn().getBody());
+                    String indexId = template.requestBody("direct:es-index", map, String.class);
+                    LOG.info("indexId {}", indexId);
+                });
 
-        ProducerTemplate template = getContext().createProducerTemplate();
         class RxRouteInline extends ObservableBody<String> {
             private RxRouteInline() {
                 super(String.class);
@@ -72,6 +83,11 @@ public class RxDemoRouteBuilder extends org.apache.camel.builder.RouteBuilder {
             }
         }
         from("direct:rx-in-slow'").process(new RxRouteInline());
+
+        // elasticsearch
+        from("direct:es-index")
+                .log(LoggingLevel.INFO, "indexing")
+                .to("elasticsearch://my-es?operation=INDEX&indexName=test&indexType=string&ip=127.0.0.1&port=9300");
 
         // setup JMX
         final MetricsRoutePolicyFactory routePolicyFactory = new MetricsRoutePolicyFactory();
