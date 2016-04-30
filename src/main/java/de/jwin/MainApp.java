@@ -14,7 +14,8 @@ public class MainApp {
         context.stop();
 */
         final Main main = new Main();
-        main.addRouteBuilder(new RxDemoRouteBuilder());
+//        main.addRouteBuilder(new RxDemoRouteBuilder());
+        main.addRouteBuilder(new GroovyDemoRouteBuilder());
         main.run(args);
     }
 
